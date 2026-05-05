@@ -1,0 +1,823 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Text Compare</title>
+<script src="https://cdn.jsdelivr.net/npm/diff@5.2.0/dist/diff.min.js"></script>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #161922;
+    --panel-2: #1c2030;
+    --border: #262b3a;
+    --text: #e6e9ef;
+    --muted: #8b93a7;
+    --accent: #6aa6ff;
+    --add-bg: rgba(46, 160, 67, 0.25);
+    --add-fg: #7ee787;
+    --del-bg: rgba(248, 81, 73, 0.25);
+    --del-fg: #ffa198;
+    --ws-marker: #4a5066;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f7f8fb;
+      --panel: #ffffff;
+      --panel-2: #f1f3f8;
+      --border: #d9dde7;
+      --text: #1b1f2a;
+      --muted: #5b6478;
+      --accent: #2f6fdc;
+      --add-bg: #d6f5dc;
+      --add-fg: #116329;
+      --del-bg: #ffd7d5;
+      --del-fg: #82071e;
+      --ws-marker: #b8bdcc;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    display: flex;
+    flex-direction: column;
+  }
+  header {
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  header h1 {
+    font-size: 16px;
+    font-weight: 600;
+    margin: 0;
+    letter-spacing: 0.2px;
+  }
+  .controls {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-left: auto;
+  }
+  .seg {
+    display: inline-flex;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .seg button {
+    background: transparent;
+    color: var(--text);
+    border: 0;
+    padding: 6px 12px;
+    font-size: 13px;
+    cursor: pointer;
+    border-right: 1px solid var(--border);
+  }
+  .seg button:last-child { border-right: 0; }
+  .seg button.active {
+    background: var(--accent);
+    color: #fff;
+  }
+  label.toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    color: var(--muted);
+    cursor: pointer;
+    user-select: none;
+  }
+  label.toggle input { accent-color: var(--accent); }
+  .btn {
+    background: var(--panel-2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 6px 12px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .btn:hover { border-color: var(--accent); }
+
+  main {
+    flex: 1;
+    display: grid;
+    grid-template-rows: 1fr 1fr;
+    gap: 12px;
+    padding: 12px;
+    min-height: 0;
+  }
+  .inputs {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    padding: 0 30px;
+    min-height: 0;
+  }
+  .pane {
+    display: flex;
+    flex-direction: column;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    min-height: 0;
+    overflow: hidden;
+  }
+  .pane-header {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+    color: var(--muted);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .pane-header .tag {
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+  }
+  textarea {
+    flex: 1;
+    width: 100%;
+    background: var(--panel);
+    color: var(--text);
+    border: 0;
+    outline: none;
+    resize: none;
+    padding: 12px;
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 13px;
+    line-height: 1.5;
+    tab-size: 2;
+  }
+
+  .output {
+    display: grid;
+    grid-template-columns: 1fr 1fr 18px;
+    gap: 12px;
+    padding-left: 30px;
+    min-height: 0;
+  }
+  .output.unified { grid-template-columns: 1fr 18px; }
+  .minimap {
+    position: relative;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    cursor: pointer;
+  }
+  .minimap canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+  }
+  .minimap-viewport {
+    position: absolute;
+    left: 0;
+    right: 0;
+    background: color-mix(in srgb, var(--text) 12%, transparent);
+    border-top: 1px solid color-mix(in srgb, var(--text) 30%, transparent);
+    border-bottom: 1px solid color-mix(in srgb, var(--text) 30%, transparent);
+    pointer-events: none;
+    transition: opacity 0.15s;
+  }
+  .minimap:hover .minimap-viewport {
+    background: color-mix(in srgb, var(--text) 18%, transparent);
+  }
+  .diff-pane {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: auto;
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 13px;
+    line-height: 1.55;
+  }
+  .diff-pane .header-row {
+    position: sticky;
+    top: 0;
+    background: var(--panel-2);
+    border-bottom: 1px solid var(--border);
+    padding: 6px 12px;
+    font-size: 11px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    z-index: 1;
+  }
+  .lines {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+  }
+  .ln {
+    padding: 0 10px;
+    color: var(--muted);
+    text-align: right;
+    user-select: none;
+    border-right: 1px solid var(--border);
+    background: var(--panel-2);
+  }
+  .row {
+    display: contents;
+  }
+  .content {
+    padding: 0 12px;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .row.add .content { background: var(--add-bg); }
+  .row.del .content { background: var(--del-bg); }
+  .row.add .ln { background: color-mix(in srgb, var(--add-bg) 55%, var(--panel-2)); }
+  .row.del .ln { background: color-mix(in srgb, var(--del-bg) 55%, var(--panel-2)); }
+  .row.empty .content { background: repeating-linear-gradient(45deg, transparent 0 6px, var(--border) 6px 7px); opacity: 0.35; min-height: 1.55em; }
+
+  .ins { background: var(--add-bg); color: var(--add-fg); border-radius: 2px; }
+  .del { background: var(--del-bg); color: var(--del-fg); text-decoration: line-through; border-radius: 2px; }
+  .nl { margin-left: 2px; padding: 0 3px; text-decoration: none; font-weight: 600; opacity: 0.85; }
+
+  .stats {
+    display: inline-flex;
+    gap: 10px;
+    align-items: center;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .stats .add-count { color: var(--add-fg); }
+  .stats .del-count { color: var(--del-fg); }
+
+  .identical-pill {
+    display: none;
+    align-items: center;
+    gap: 6px;
+    background: var(--add-bg);
+    color: var(--add-fg);
+    font-size: 12px;
+    font-weight: 600;
+    padding: 4px 10px;
+    border-radius: 999px;
+    border: 1px solid color-mix(in srgb, var(--add-fg) 35%, transparent);
+    letter-spacing: 0.2px;
+  }
+  body.is-identical .identical-pill { display: inline-flex; }
+  body.is-identical .stats { display: none; }
+
+  .identical-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    background: color-mix(in srgb, var(--add-bg) 60%, var(--panel));
+    color: var(--add-fg);
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+    pointer-events: none;
+    border-radius: 10px;
+    z-index: 2;
+  }
+  .identical-overlay .check {
+    font-size: 28px;
+    line-height: 1;
+  }
+  .identical-overlay .sub {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--muted);
+    letter-spacing: 0.2px;
+  }
+  .diff-pane { position: relative; }
+  body:not(.is-identical) .identical-overlay { display: none; }
+
+@media (max-width: 800px) {
+    .inputs, .output { grid-template-columns: 1fr; }
+    main { grid-template-rows: auto auto; }
+    .pane, .diff-pane { min-height: 200px; }
+  }
+</style>
+</head>
+<body>
+  <header>
+    <h1>Text Compare</h1>
+    <div class="stats">
+      <span class="add-count">+<span id="addCount">0</span></span>
+      <span class="del-count">−<span id="delCount">0</span></span>
+    </div>
+    <div class="identical-pill" id="identicalPill" aria-live="polite">
+      <span aria-hidden="true">✓</span>
+      <span>Identical</span>
+    </div>
+    <div class="controls">
+      <div class="seg" id="modeSeg" title="Diff granularity">
+        <button data-mode="chars">Chars</button>
+        <button data-mode="words" class="active">Words</button>
+        <button data-mode="lines">Lines</button>
+      </div>
+      <div class="seg" id="viewSeg" title="View">
+        <button data-view="split" class="active">Split</button>
+        <button data-view="unified">Unified</button>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section class="inputs">
+      <div class="pane">
+        <div class="pane-header"><span class="tag">Before (left)</span><span id="leftStats"></span></div>
+        <textarea id="left" spellcheck="false" placeholder="Paste original text here…"></textarea>
+      </div>
+      <div class="pane">
+        <div class="pane-header"><span class="tag">After (right)</span><span id="rightStats"></span></div>
+        <textarea id="right" spellcheck="false" placeholder="Paste new text here…"></textarea>
+      </div>
+    </section>
+
+    <section class="output" id="output">
+      <div class="diff-pane" id="diffLeft">
+        <div class="header-row">Before</div>
+        <div class="lines" id="diffLeftBody"></div>
+        <div class="identical-overlay" aria-hidden="true">
+          <div class="check">✓</div>
+          <div>Texts are identical</div>
+          <div class="sub">No differences detected</div>
+        </div>
+      </div>
+      <div class="diff-pane" id="diffRight">
+        <div class="header-row">After</div>
+        <div class="lines" id="diffRightBody"></div>
+        <div class="identical-overlay" aria-hidden="true">
+          <div class="check">✓</div>
+          <div>Texts are identical</div>
+          <div class="sub">No differences detected</div>
+        </div>
+      </div>
+      <div class="minimap" id="minimap" title="Click to jump">
+        <canvas id="minimapCanvas"></canvas>
+        <div class="minimap-viewport" id="minimapViewport"></div>
+      </div>
+    </section>
+  </main>
+
+
+<script>
+(function() {
+  const left = document.getElementById('left');
+  const right = document.getElementById('right');
+  const output = document.getElementById('output');
+  const diffLeft = document.getElementById('diffLeft');
+  const diffRight = document.getElementById('diffRight');
+  const diffLeftBody = document.getElementById('diffLeftBody');
+  const diffRightBody = document.getElementById('diffRightBody');
+  const addCountEl = document.getElementById('addCount');
+  const delCountEl = document.getElementById('delCount');
+  const leftStats = document.getElementById('leftStats');
+  const rightStats = document.getElementById('rightStats');
+
+  const state = {
+    mode: 'words',
+    view: 'split',
+  };
+
+  // Persist UI preferences only (not text)
+  const STORAGE = 'text-compare-state-v1';
+  try {
+    const saved = JSON.parse(localStorage.getItem(STORAGE) || '{}');
+    Object.assign(state, saved);
+  } catch {}
+  // Clean up old key that used to also store text
+  try { localStorage.removeItem('text-compare-v1'); } catch {}
+
+  function saveState() {
+    try { localStorage.setItem(STORAGE, JSON.stringify(state)); } catch {}
+  }
+
+  function escapeHtml(s) {
+    return s.replace(/[&<>"']/g, c => ({
+      '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+    }[c]));
+  }
+
+  function renderText(s) {
+    return escapeHtml(s);
+  }
+
+  function applyInlineMarks(text, marks) {
+    // marks: [{start,end,type:'ins'|'del'}]
+    if (!marks.length) return renderText(text);
+    marks.sort((a,b) => a.start - b.start);
+    let out = '';
+    let i = 0;
+    for (const m of marks) {
+      if (m.start > i) out += renderText(text.slice(i, m.start));
+      out += `<span class="${m.type}">${renderText(text.slice(m.start, m.end))}</span>`;
+      i = m.end;
+    }
+    if (i < text.length) out += renderText(text.slice(i));
+    return out;
+  }
+
+  function diffParts(a, b) {
+    if (state.mode === 'chars') return Diff.diffChars(a, b);
+    if (state.mode === 'words') return Diff.diffWordsWithSpace(a, b);
+    return Diff.diffLines(a, b, { newlineIsToken: false });
+  }
+
+  function buildLineRows(text, parts, side) {
+    // side: 'left' uses removed+common; 'right' uses added+common
+    // Walk parts, expand into lines, with intra-line marks where possible.
+    const wantAdd = side === 'right';
+    const wantDel = side === 'left';
+    const rows = []; // {type:'eq'|'add'|'del'|'empty', content:string-html, lineNo:number|null}
+    let lineNo = 1;
+    let buffer = ''; // current line text (for marks placement)
+    let bufferMarks = [];
+    let bufferType = 'eq';
+    let bufferSuffix = '';
+
+    function pushLine() {
+      const html = applyInlineMarks(buffer, bufferMarks) + bufferSuffix;
+      rows.push({ type: bufferType, content: html, lineNo: lineNo++ });
+      buffer = '';
+      bufferMarks = [];
+      bufferType = 'eq';
+      bufferSuffix = '';
+    }
+
+    for (const part of parts) {
+      const isAdd = part.added;
+      const isDel = part.removed;
+      if (isAdd && !wantAdd) continue;
+      if (isDel && !wantDel) continue;
+
+      const text = part.value;
+      const markType = isAdd ? 'ins' : isDel ? 'del' : null;
+
+      // Split by newlines, preserving them
+      const segments = text.split('\n');
+      for (let si = 0; si < segments.length; si++) {
+        const seg = segments[si];
+        if (seg.length) {
+          const start = buffer.length;
+          buffer += seg;
+          if (markType) {
+            bufferMarks.push({ start, end: buffer.length, type: markType });
+            if (bufferType === 'eq') bufferType = isAdd ? 'add' : 'del';
+          }
+        }
+        if (si < segments.length - 1) {
+          // newline boundary — if it came from an add/del part, mark it
+          if (markType) {
+            bufferSuffix = `<span class="${markType} nl">↵</span>`;
+            if (bufferType === 'eq') bufferType = isAdd ? 'add' : 'del';
+          }
+          pushLine();
+        }
+      }
+    }
+    // trailing buffer (last line w/o newline)
+    if (buffer.length || bufferSuffix || rows.length === 0) {
+      const html = applyInlineMarks(buffer, bufferMarks) + bufferSuffix;
+      rows.push({ type: bufferType, content: html, lineNo: lineNo++ });
+    }
+    return rows;
+  }
+
+  function alignRows(leftRows, rightRows) {
+    // Align using line types so that paired add/del are adjacent and unchanged lines align.
+    // We walk both sequences; when both sides have 'eq' lines, advance both; when one has add/del, insert empty on the other side.
+    const out = { left: [], right: [] };
+    let i = 0, j = 0;
+    while (i < leftRows.length || j < rightRows.length) {
+      const l = leftRows[i];
+      const r = rightRows[j];
+      if (l && r && l.type === 'eq' && r.type === 'eq') {
+        out.left.push(l); out.right.push(r); i++; j++;
+      } else if (l && l.type === 'del' && r && r.type === 'add') {
+        out.left.push(l); out.right.push(r); i++; j++;
+      } else if (l && l.type === 'del') {
+        out.left.push(l); out.right.push({ type:'empty', content:'', lineNo:null }); i++;
+      } else if (r && r.type === 'add') {
+        out.left.push({ type:'empty', content:'', lineNo:null }); out.right.push(r); j++;
+      } else if (l) {
+        out.left.push(l); out.right.push(r || { type:'empty', content:'', lineNo:null });
+        i++; if (r) j++;
+      } else {
+        out.left.push({ type:'empty', content:'', lineNo:null }); out.right.push(r); j++;
+      }
+    }
+    return out;
+  }
+
+  function renderRows(container, rows) {
+    const frag = document.createDocumentFragment();
+    for (const row of rows) {
+      const ln = document.createElement('div');
+      ln.className = 'ln';
+      ln.textContent = row.lineNo == null ? '' : String(row.lineNo);
+      const c = document.createElement('div');
+      c.className = 'content';
+      c.innerHTML = row.content || '​';
+      // wrap row markers via grid-row sibling classes — use a wrapper class on both via parent grid + per-cell class
+      const wrap = document.createElement('div');
+      wrap.className = 'row ' + (row.type === 'eq' ? '' : row.type);
+      wrap.appendChild(ln);
+      wrap.appendChild(c);
+      // grid: use display:contents on .row to place ln/content directly into .lines
+      frag.appendChild(wrap);
+    }
+    container.innerHTML = '';
+    container.appendChild(frag);
+  }
+
+  function renderUnified(parts) {
+    // Single column showing both sides interleaved with markers
+    const container = document.createElement('div');
+    container.className = 'lines';
+    container.style.gridTemplateColumns = 'max-content 1fr';
+
+    let ln = 1;
+    const rows = [];
+    let curText = '';
+    let curMarks = [];
+    let curType = 'eq';
+    let curSuffix = '';
+
+    function flush() {
+      const html = applyInlineMarks(curText, curMarks) + curSuffix;
+      rows.push({ type: curType, content: html, lineNo: ln++ });
+      curText = '';
+      curMarks = [];
+      curType = 'eq';
+      curSuffix = '';
+    }
+
+    for (const part of parts) {
+      const text = part.value;
+      const markType = part.added ? 'ins' : part.removed ? 'del' : null;
+      const lineType = part.added ? 'add' : part.removed ? 'del' : 'eq';
+      const segs = text.split('\n');
+      for (let si = 0; si < segs.length; si++) {
+        const seg = segs[si];
+        if (seg.length) {
+          const start = curText.length;
+          curText += seg;
+          if (markType) curMarks.push({ start, end: curText.length, type: markType });
+          if (curType === 'eq') curType = lineType;
+        }
+        if (si < segs.length - 1) {
+          if (markType) {
+            curSuffix = `<span class="${markType} nl">↵</span>`;
+            if (curType === 'eq') curType = lineType;
+          }
+          flush();
+        }
+      }
+    }
+    if (curText.length || curSuffix || rows.length === 0) flush();
+
+    renderRows(container, rows);
+    return container;
+  }
+
+  function update() {
+    // Render mode buttons & view buttons
+    document.querySelectorAll('#modeSeg button').forEach(b => b.classList.toggle('active', b.dataset.mode === state.mode));
+    document.querySelectorAll('#viewSeg button').forEach(b => b.classList.toggle('active', b.dataset.view === state.view));
+
+    output.classList.toggle('unified', state.view === 'unified');
+
+    leftStats.textContent = `${left.value.length} chars · ${left.value ? left.value.split('\n').length : 0} lines`;
+    rightStats.textContent = `${right.value.length} chars · ${right.value ? right.value.split('\n').length : 0} lines`;
+
+    const a = left.value;
+    const b = right.value;
+    const parts = diffParts(a, b);
+
+    // Stats
+    let addCount = 0, delCount = 0;
+    for (const p of parts) {
+      if (p.added) addCount += p.value.length;
+      else if (p.removed) delCount += p.value.length;
+    }
+    addCountEl.textContent = addCount;
+    delCountEl.textContent = delCount;
+
+    const bothNonEmpty = a.length > 0 && b.length > 0;
+    const isIdentical = bothNonEmpty && addCount === 0 && delCount === 0;
+    document.body.classList.toggle('is-identical', isIdentical);
+
+    let minimapRows;
+    if (state.view === 'unified') {
+      diffLeft.style.display = 'none';
+      diffRight.innerHTML = '<div class="header-row">Unified diff</div>';
+      const unifiedContainer = renderUnified(parts);
+      diffRight.appendChild(unifiedContainer);
+      diffRight.style.display = '';
+      // Build row types from rendered unified rows
+      minimapRows = Array.from(unifiedContainer.querySelectorAll('.row')).map(r => {
+        if (r.classList.contains('add')) return 'add';
+        if (r.classList.contains('del')) return 'del';
+        return 'eq';
+      });
+    } else {
+      diffLeft.style.display = '';
+      diffRight.style.display = '';
+      diffLeft.innerHTML = '<div class="header-row">Before</div><div class="lines" id="diffLeftBody"></div>';
+      diffRight.innerHTML = '<div class="header-row">After</div><div class="lines" id="diffRightBody"></div>';
+      const lBody = diffLeft.querySelector('.lines');
+      const rBody = diffRight.querySelector('.lines');
+
+      const leftRows = buildLineRows(a, parts, 'left');
+      const rightRows = buildLineRows(b, parts, 'right');
+      const aligned = alignRows(leftRows, rightRows);
+      renderRows(lBody, aligned.left);
+      renderRows(rBody, aligned.right);
+
+      // Merge: each row position is changed if either side is non-eq
+      minimapRows = aligned.left.map((l, i) => {
+        const r = aligned.right[i];
+        const ld = l.type === 'del';
+        const ra = r.type === 'add';
+        if (ld && ra) return 'change';
+        if (ld) return 'del';
+        if (ra) return 'add';
+        return 'eq';
+      });
+    }
+
+    setupScrollSync();
+    drawMinimap(minimapRows);
+    updateMinimapViewport();
+  }
+
+  // --- Scroll sync + minimap ---
+  const minimap = document.getElementById('minimap');
+  const minimapCanvas = document.getElementById('minimapCanvas');
+  const minimapViewport = document.getElementById('minimapViewport');
+  let scrollSyncBound = false;
+  let syncing = false;
+
+  function activePane() {
+    return state.view === 'unified' ? diffRight : diffLeft;
+  }
+
+  function setupScrollSync() {
+    if (!scrollSyncBound) {
+      diffLeft.addEventListener('scroll', onLeftScroll);
+      diffRight.addEventListener('scroll', onRightScroll);
+      scrollSyncBound = true;
+    }
+  }
+
+  function onLeftScroll() {
+    if (syncing) return;
+    if (state.view === 'split') {
+      syncing = true;
+      diffRight.scrollTop = diffLeft.scrollTop;
+      syncing = false;
+    }
+    updateMinimapViewport();
+  }
+  function onRightScroll() {
+    if (syncing) return;
+    if (state.view === 'split') {
+      syncing = true;
+      diffLeft.scrollTop = diffRight.scrollTop;
+      syncing = false;
+    }
+    updateMinimapViewport();
+  }
+
+  function drawMinimap(rows) {
+    const cssW = minimap.clientWidth;
+    const cssH = minimap.clientHeight;
+    const dpr = window.devicePixelRatio || 1;
+    minimapCanvas.width = Math.max(1, Math.floor(cssW * dpr));
+    minimapCanvas.height = Math.max(1, Math.floor(cssH * dpr));
+    minimapCanvas.style.width = cssW + 'px';
+    minimapCanvas.style.height = cssH + 'px';
+    const ctx = minimapCanvas.getContext('2d');
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.scale(dpr, dpr);
+    ctx.clearRect(0, 0, cssW, cssH);
+    if (!rows || !rows.length) return;
+
+    const styles = getComputedStyle(document.documentElement);
+    const addCol = styles.getPropertyValue('--add-bg').trim() || 'rgba(46,160,67,0.4)';
+    const delCol = styles.getPropertyValue('--del-bg').trim() || 'rgba(248,81,73,0.4)';
+
+    const rowH = cssH / rows.length;
+    const drawH = Math.max(rowH, 2);
+    for (let i = 0; i < rows.length; i++) {
+      const t = rows[i];
+      if (t === 'eq') continue;
+      const y = i * rowH;
+      if (t === 'add') {
+        ctx.fillStyle = addCol;
+        ctx.fillRect(0, y, cssW, drawH);
+      } else if (t === 'del') {
+        ctx.fillStyle = delCol;
+        ctx.fillRect(0, y, cssW, drawH);
+      } else if (t === 'change') {
+        ctx.fillStyle = delCol;
+        ctx.fillRect(0, y, cssW / 2, drawH);
+        ctx.fillStyle = addCol;
+        ctx.fillRect(cssW / 2, y, cssW / 2, drawH);
+      }
+    }
+  }
+
+  function updateMinimapViewport() {
+    const pane = activePane();
+    const mh = minimap.clientHeight;
+    const sh = pane.scrollHeight;
+    const ch = pane.clientHeight;
+    if (sh <= ch || mh === 0) {
+      minimapViewport.style.display = 'none';
+      return;
+    }
+    minimapViewport.style.display = '';
+    const vh = Math.max(20, (ch / sh) * mh);
+    const maxTop = mh - vh;
+    const ratio = pane.scrollTop / (sh - ch);
+    minimapViewport.style.top = (ratio * maxTop) + 'px';
+    minimapViewport.style.height = vh + 'px';
+  }
+
+  function jumpFromMinimap(clientY) {
+    const rect = minimap.getBoundingClientRect();
+    const y = Math.max(0, Math.min(rect.height, clientY - rect.top));
+    const pane = activePane();
+    const target = (y / rect.height) * pane.scrollHeight - pane.clientHeight / 2;
+    pane.scrollTop = Math.max(0, target);
+    if (state.view === 'split') {
+      syncing = true;
+      diffRight.scrollTop = pane.scrollTop;
+      diffLeft.scrollTop = pane.scrollTop;
+      syncing = false;
+    }
+    updateMinimapViewport();
+  }
+
+  let dragging = false;
+  minimap.addEventListener('mousedown', e => {
+    dragging = true;
+    jumpFromMinimap(e.clientY);
+  });
+  window.addEventListener('mousemove', e => {
+    if (dragging) jumpFromMinimap(e.clientY);
+  });
+  window.addEventListener('mouseup', () => { dragging = false; });
+
+  window.addEventListener('resize', () => {
+    // Redraw based on current rendered state
+    update();
+  });
+
+  // Events
+  left.addEventListener('input', update);
+  right.addEventListener('input', update);
+
+  document.getElementById('modeSeg').addEventListener('click', e => {
+    const btn = e.target.closest('button'); if (!btn) return;
+    state.mode = btn.dataset.mode; saveState(); update();
+  });
+  document.getElementById('viewSeg').addEventListener('click', e => {
+    const btn = e.target.closest('button'); if (!btn) return;
+    state.view = btn.dataset.view; saveState(); update();
+  });
+  // Add a tiny bit of polish: tab inserts two spaces in textareas
+  for (const ta of [left, right]) {
+    ta.addEventListener('keydown', e => {
+      if (e.key === 'Tab' && !e.shiftKey) {
+        e.preventDefault();
+        const s = ta.selectionStart, en = ta.selectionEnd;
+        ta.value = ta.value.slice(0, s) + '  ' + ta.value.slice(en);
+        ta.selectionStart = ta.selectionEnd = s + 2;
+        update();
+      }
+    });
+  }
+
+  // Wait for diff library, then run once
+  function init() {
+    if (typeof Diff === 'undefined') { setTimeout(init, 50); return; }
+    update();
+  }
+  init();
+})();
+</script>
+</body>
+</html>
