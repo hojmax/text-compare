@@ -111,11 +111,20 @@
   main {
     flex: 1;
     display: grid;
-    grid-template-rows: 1fr 1fr;
-    gap: 12px;
+    grid-template-rows: var(--top-frac, 1fr) 6px var(--bot-frac, 1fr);
+    gap: 6px;
     padding: 12px;
     min-height: 0;
   }
+  .resizer {
+    background: var(--border);
+    border-radius: 3px;
+    cursor: row-resize;
+    margin: 0 30px;
+    transition: background 0.15s;
+  }
+  .resizer:hover, .resizer.dragging { background: var(--accent); }
+  body.resizing { cursor: row-resize; user-select: none; }
   .inputs {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -303,7 +312,7 @@
 
 @media (max-width: 800px) {
     .inputs, .output { grid-template-columns: 1fr; }
-    main { grid-template-rows: auto auto; }
+    main { grid-template-rows: auto 6px auto; }
     .pane, .diff-pane { min-height: 200px; }
   }
 </style>
@@ -343,6 +352,8 @@
         <textarea id="right" spellcheck="false" placeholder="Paste new text here…"></textarea>
       </div>
     </section>
+
+    <div class="resizer" id="resizer" role="separator" aria-orientation="horizontal" title="Drag to resize"></div>
 
     <section class="output" id="output">
       <div class="diff-pane" id="diffLeft">
@@ -715,8 +726,9 @@
     if (!rows || !rows.length) return;
 
     const styles = getComputedStyle(document.documentElement);
-    const addCol = styles.getPropertyValue('--add-bg').trim() || 'rgba(46,160,67,0.4)';
-    const delCol = styles.getPropertyValue('--del-bg').trim() || 'rgba(248,81,73,0.4)';
+    const addCol = styles.getPropertyValue('--add-fg').trim() || '#3fb950';
+    const delCol = styles.getPropertyValue('--del-fg').trim() || '#f85149';
+    ctx.globalAlpha = 0.65;
 
     const rowH = cssH / rows.length;
     const drawH = Math.max(rowH, 2);
@@ -783,6 +795,45 @@
 
   window.addEventListener('resize', () => {
     // Redraw based on current rendered state
+    update();
+  });
+
+  // --- Vertical resizer between inputs and output ---
+  const resizer = document.getElementById('resizer');
+  const mainEl = document.querySelector('main');
+
+  function applySplit(frac) {
+    const f = Math.max(0.1, Math.min(0.9, frac));
+    state.splitFrac = f;
+    mainEl.style.setProperty('--top-frac', f + 'fr');
+    mainEl.style.setProperty('--bot-frac', (1 - f) + 'fr');
+  }
+  if (typeof state.splitFrac === 'number') applySplit(state.splitFrac);
+
+  let resizingSplit = false;
+  resizer.addEventListener('mousedown', e => {
+    resizingSplit = true;
+    resizer.classList.add('dragging');
+    document.body.classList.add('resizing');
+    e.preventDefault();
+  });
+  window.addEventListener('mousemove', e => {
+    if (!resizingSplit) return;
+    const rect = mainEl.getBoundingClientRect();
+    applySplit((e.clientY - rect.top) / rect.height);
+    updateMinimapViewport();
+  });
+  window.addEventListener('mouseup', () => {
+    if (!resizingSplit) return;
+    resizingSplit = false;
+    resizer.classList.remove('dragging');
+    document.body.classList.remove('resizing');
+    saveState();
+    update();
+  });
+  resizer.addEventListener('dblclick', () => {
+    applySplit(0.5);
+    saveState();
     update();
   });
 
